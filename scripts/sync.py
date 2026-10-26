@@ -37,8 +37,6 @@ SDK_RUNTIME_FILES = [
     "src/main/java/io/lmctl/lmcode/VmString.java",
 ]
 
-SUITE_PINNED_COMMIT = "0ea7cb9eb5806ee7f62cd17bb01b8580ec373adf"
-
 
 def files(directory: Path):
     return sorted(
@@ -90,17 +88,18 @@ def main():
 
     default_source = ROOT.parent / ("lmcode-java" if mode == "sdk" else "lmcode-cpp")
     source = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else default_source
+    commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     if mode == "sdk":
-        commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
         destination = ROOT / "vendor/lmcode-java"
         extract_git_archive(source, commit, SDK_RUNTIME_FILES, destination)
         (ROOT / "std").mkdir(exist_ok=True)
         (ROOT / "std/lmcode-std.schema.json").write_bytes((destination / "std/lmcode-std.schema.json").read_bytes())
         repo_name = "lmctl-ai/lmcode-java"
     else:
-        commit = SUITE_PINNED_COMMIT if len(sys.argv) <= 3 else sys.argv[3]
         destination = ROOT / "sample-suite"
         extract_git_archive(source, commit, ["sample-suite"], destination, strip_prefix="sample-suite")
+        (ROOT / "src/main/resources").mkdir(parents=True, exist_ok=True)
+        (ROOT / "src/main/resources/sample.dsl.json").write_bytes((destination / "sample.dsl.json").read_bytes())
         repo_name = "lmctl-ai/lmcode-cpp"
 
     (ROOT / f"{mode}.lock").write_text(
