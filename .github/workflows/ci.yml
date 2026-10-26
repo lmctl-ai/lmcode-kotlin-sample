@@ -1,0 +1,55 @@
+name: Kotlin sample
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      compiler:
+        description: Published lmscript version used by the reference suite
+        default: '0.2.420'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    env:
+      LMSCRIPT_VERSION: ${{ inputs.compiler || '0.2.420' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, label: linux-x64}
+          - {os: macos-15, label: macos-arm64}
+          - {os: windows-2022, label: windows-x64}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@8df103950263300423100f8fa711f9d699ebd2d3
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install pinned compiler and environment tools
+        run: |
+          npm install --global "@lmctl-ai/lmctl@$LMSCRIPT_VERSION"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            mkdir -p .ci-bin
+            printf '#!/usr/bin/env bash\nexec python "$@"\n' > .ci-bin/python3
+            chmod +x .ci-bin/python3
+            echo "$PWD/.ci-bin" >> "$GITHUB_PATH"
+          fi
+      - name: Build, protocol, all 50 corpus cases, compiler reproducibility, and runner controls
+        run: ./test.sh
