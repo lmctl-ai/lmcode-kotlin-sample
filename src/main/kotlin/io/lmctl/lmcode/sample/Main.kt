@@ -3,13 +3,15 @@ package io.lmctl.lmcode.sample
 import io.lmctl.lmcode.Program
 import io.lmctl.lmcode.Reports
 import io.lmctl.lmcode.VmException
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.system.exitProcess
 
 object Main {
-    const val VERSION = "0.1.0"
+    const val VERSION = "0.2.0"
 
     private fun schemaBytes(): ByteArray {
         val input: InputStream = Main::class.java.getResourceAsStream("/sample.dsl.json")
@@ -81,7 +83,14 @@ object Main {
                 return Reports.appFailure("ledger: negative balance")
             }
 
-            Protocol.success(host.ledger)
+            val result = ByteArrayOutputStream(64)
+            result.writeBytes(
+                ("{\"balance\": ${host.ledger.balance}, \"entries\": ${host.ledger.entries}, \"note\": ")
+                    .toByteArray(StandardCharsets.US_ASCII)
+            )
+            result.writeBytes(Reports.escapeBytes(host.ledger.note))
+            result.write('}'.code)
+            Reports.ok(result.toByteArray())
         } catch (e: Exception) {
             Reports.appFailure("cannot read sample input")
         }

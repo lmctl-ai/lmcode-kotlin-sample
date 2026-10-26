@@ -6,6 +6,10 @@ import io.lmctl.lmcode.Stdlib
 import io.lmctl.lmcode.Value
 import io.lmctl.lmcode.VmException
 import io.lmctl.lmcode.VmString
+import java.util.ArrayList
+import java.util.Collections
+import java.util.HexFormat
+import java.util.LinkedHashMap
 
 // Ordinary Kotlin objects represent domain state. The VM sees only
 // typed Value handles; Context binds context variables per run.
@@ -20,29 +24,35 @@ class Host {
     val shop = Shop()
     val ledger = Ledger()
 
-    // Helper for Value.object (escaped since 'object' is a Kotlin keyword)
-    private fun valueObject(type: String, obj: Any): Value = Value.`object`(type, obj)
+    private fun valueObject(type: String, obj: Any?): Value = Value.`object`(type, obj)
     private fun money(cents: Long): Value = valueObject("Money", Money(cents))
     private fun text(s: String): Value = Value.ofString(VmString.fromString(s))
 
     private fun units(amount: Double): Value {
         // Round halfway away from zero to cents (matching C++ std::round).
-        val raw = amount * 100.0
-        val cents = if (raw >= 0.0) Math.floor(raw + 0.5) else -Math.floor(-raw + 0.5)
+        val scaled = amount * 100.0
+        val cents = if (scaled >= 0.0) Math.floor(scaled + 0.5) else Math.ceil(scaled - 0.5)
         if (!cents.isFinite() || cents < -9223372036854775808.0 || cents >= 9223372036854775808.0) {
             throw VmException.host("money: amount out of range")
         }
         return money(cents.toLong())
     }
 
+    private fun asMoney(value: Value): Money {
+        val m = value.asObject() as? Money
+            ?: throw VmException.host("money: null handle")
+        return m
+    }
+
     init {
         // Context variables declared in host.schema.json: "shop: Shop" and "ledger: Ledger"
         registry.context("shop", "Shop").context("ledger", "Ledger")
-        Stdlib.registerTesting(registry, null) // Opt-in: raw print and assert_close testing catalog.
+        registerConversions(registry)
+        Stdlib.registerTesting(registry, System.out) // Opt-in: raw print and assert_close testing catalog.
 
         // Initial inventory
         for (cents in longArrayOf(125L, 250L, 375L)) {
-            shop.items.values.add(Money(cents))
+            shop.items.values.add((money(cents).asObject() as Money))
         }
 
         // Functions: overloads are distinguished by parameter types (int = cents, float = units)
@@ -57,33 +67,26 @@ class Host {
 
         // Money methods
         registry.method("Money", "amount", emptyList(), "int") { _, self, _ ->
-            Value.ofInt((self.asObject() as Money).cents)
+            Value.ofInt(asMoney(self).cents)
         }
-        registry.method("Money", "currency", emptyList(), "Currency") { _, _, _ ->
+        registry.method("Money", "currency", emptyList(), "Currency") { _, self, _ ->
+            asMoney(self)
             text("USD") // String-backed enum
         }
         registry.method("Money", "plus", listOf("Money"), "Money") { _, self, a ->
-            val left = (self.asObject() as Money).cents
-            val right = (a[0].asObject() as Money).cents
-            money(left + right)
+            money(asMoney(self).cents + asMoney(a[0]).cents)
         }
         registry.method("Money", "minus", listOf("Money"), "Money") { _, self, a ->
-            val left = (self.asObject() as Money).cents
-            val right = (a[0].asObject() as Money).cents
-            money(left - right)
+            money(asMoney(self).cents - asMoney(a[0]).cents)
         }
         registry.method("Money", "times", listOf("int"), "Money") { _, self, a ->
-            val left = (self.asObject() as Money).cents
-            val right = a[0].asInt()
-            money(left * right)
+            money(asMoney(self).cents * a[0].asInt())
         }
         registry.method("Money", "neg", emptyList(), "Money") { _, self, _ ->
-            val left = (self.asObject() as Money).cents
-            money(-left)
+            money(-asMoney(self).cents)
         }
         registry.method("Money", "set", listOf("int"), "Money") { _, self, a ->
-            val m = self.asObject() as Money
-            m.cents = a[0].asInt()
+            asMoney(self).cents = a[0].asInt()
             self // returns:self normalizes to receiver
         }
 
@@ -117,8 +120,7 @@ class Host {
         // Ledger methods: fluent mutation, state inspection, and located errors
         registry.method("Ledger", "record", listOf("Money"), "Ledger") { _, self, a ->
             val l = self.asObject() as Ledger
-            val m = a[0].asObject() as Money
-            l.balance += m.cents
+            l.balance += asMoney(a[0]).cents
             l.entries += 1L
             self
         }
@@ -140,8 +142,72 @@ class Host {
         }
     }
 
+    private fun registerConversions(r: Registry) {
+        r.function("host_int", listOf("int"), "int") { _, _, a -> Value.ofInt(a[0].asInt()) }
+        r.function("host_float", listOf("float"), "float") { _, _, a -> Value.ofFloat(a[0].asFloat()) }
+        r.function("host_bool", listOf("bool"), "bool") { _, _, a -> Value.ofBool(a[0].asBool()) }
+        r.function("host_bytes", listOf("string"), "string") { _, _, a -> Value.ofString(a[0].asString()) }
+        r.function("host_hex", listOf("string"), "string") { _, _, a ->
+            Value.ofString(HexFormat.of().formatHex(a[0].asString().bytes()))
+        }
+        r.function("host_float_case", listOf("string"), "float") { _, _, a ->
+            when (a[0].asString().toString()) {
+                "-0" -> Value.ofFloat(-0.0)
+                "nan" -> Value.ofFloat(Double.NaN)
+                "inf" -> Value.ofFloat(Double.POSITIVE_INFINITY)
+                "-inf" -> Value.ofFloat(Double.NEGATIVE_INFINITY)
+                "large" -> Value.ofFloat(1e21)
+                "subnormal" -> Value.ofFloat(Double.MIN_VALUE)
+                else -> throw VmException.host("host_float_case: unknown case")
+            }
+        }
+        r.function("host_echo_money", listOf("Money"), "Money") { _, _, a -> a[0] }
+        r.function("host_same", listOf("Money", "Money"), "bool") { _, _, a ->
+            Value.ofBool(a[0].asObject() === a[1].asObject())
+        }
+        r.function("host_null", emptyList(), "Money") { _, _, _ -> valueObject("Money", null) }
+        r.function("host_is_null", listOf("Money"), "bool") { _, _, a ->
+            Value.ofBool(a[0].asObject() == null)
+        }
+        r.function("host_wrong", emptyList(), "Money") { _, _, _ -> valueObject("Items", null) }
+        r.function("host_void", emptyList(), "void") { _, _, _ -> Value.none() }
+        r.function("host_str_list", listOf("StrList"), "StrList") { c, _, a ->
+            val items = ArrayList<VmString>()
+            for (v in Stdlib.collectionValues(a[0])) items.add(v.asString())
+            items.add(VmString.fromString("host"))
+            Stdlib.makeStrList(c, items)
+        }
+        r.function("host_int_list", listOf("IntList"), "IntList") { c, _, a ->
+            val items = ArrayList<Long>()
+            for (v in Stdlib.collectionValues(a[0])) items.add(v.asInt())
+            items.add(9L)
+            Stdlib.makeIntList(c, items)
+        }
+        r.function("host_float_list", listOf("FloatList"), "FloatList") { c, _, a ->
+            val items = ArrayList<Double>()
+            for (v in Stdlib.collectionValues(a[0])) items.add(v.asFloat())
+            items.add(0.5)
+            Stdlib.makeFloatList(c, items)
+        }
+        r.function("host_str_map", listOf("StrMap"), "StrMap") { c, _, a ->
+            val entries = LinkedHashMap<VmString, VmString>(Stdlib.mapEntries(a[0]))
+            entries[VmString.fromString("host")] = VmString.fromString("yes")
+            Stdlib.makeStrMap(c, entries)
+        }
+        r.function("host_sum", Collections.nCopies(255, "int"), "int") { _, _, a ->
+            var sum = 0L
+            for (v in a) sum += v.asInt()
+            Value.ofInt(sum)
+        }
+        r.function("host_long_" + "x".repeat(128), listOf("int"), "int") { _, _, a ->
+            Value.ofInt(a[0].asInt())
+        }
+    }
+
     fun context(): Context {
         val ctx = Context()
+        ctx.instructionLimit = Long.MAX_VALUE
+        ctx.memoryLimitBytes = Long.MAX_VALUE
         ctx.setObject("shop", "Shop", shop)
         ctx.setObject("ledger", "Ledger", ledger)
         return ctx
