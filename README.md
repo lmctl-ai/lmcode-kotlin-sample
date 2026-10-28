@@ -5,29 +5,29 @@
 ```sh
 java -version
 mvn -version
-npm install --global @lmctl-ai/lmctl@0.2.420   # Node 24+
 mvn package -DskipTests
-./test.sh
+LMSCRIPT_BIN=/path/to/v6-entries-capable/lmscript ./test.sh
 ./bin/lmcode-kotlin-sample --version
 ```
 
-Case 067 uses R47/R48 rule methods; reproducing its pinned bytecode needs a rule-methods-capable compiler,
-so set `LMSCRIPT_BIN` to a current lmctl-mono `lmscript` build until a containing release is published
-(see [sample-suite/README.md](sample-suite/README.md)). Runtime execution of the pinned bytecode works on
-any compiler version, since annotations and interface bindings are compile-time metadata only.
+The corpus is DSLB v6 (R49 rule entries): reproducing the pinned bytecode needs the v6-entries compiler
+from lmctl-mono, so set `LMSCRIPT_BIN` to its built `lmscript` — published releases (including the first
+rule-methods-capable `@lmctl-ai/lmctl@0.2.442`) cannot reproduce the v6 corpus yet
+(see [sample-suite/README.md](sample-suite/README.md)). The vendored v6 SDK runs the pinned bytes directly
+and refuses v5 files at load (093).
 
 ## Write a host in Kotlin in ten steps
 
 1. **Review the portable contract:** Read [CONTRACT.md](sample-suite/CONTRACT.md) to understand execution phases, exit codes (0 for success, 2 for CLI usage, 3 for VM/load, 4 for application failure), and domain lifetimes.
-2. **Inspect the schema:** Check [host.schema.json](sample-suite/host.schema.json) for declared contexts (`shop: Shop`, `ledger: Ledger`), types, operator mappings, overloads, enum definitions (`Currency`), and one SAM interface (`Adjuster`, `(Money) -> void`) under `interfaces`.
+2. **Inspect the schema:** Check [host.schema.json](sample-suite/host.schema.json) for declared contexts (`shop: Shop`, `ledger: Ledger`), types, operator mappings, overloads, enum definitions (`Currency`), and two SAM interfaces (`Adjuster`, `(Money) -> void`; `Score`, `(Money) -> int`) under `interfaces`.
 3. **Configure the mixed build:** Set up [pom.xml](pom.xml) with `kotlin-maven-plugin` and `build-helper-maven-plugin` to compile Kotlin alongside vendored Java SDK sources without external network dependencies.
 4. **Define domain models:** Model domain state with standard Kotlin classes ([Shop.kt](src/main/kotlin/io/lmctl/lmcode/sample/Shop.kt#L14-L17))—`Money`, `Items`, `Shop`, and `Ledger`—keeping mutation within the host process arena.
 5. **Declare contexts & testing catalog:** Call `registry.context("shop", "Shop").context("ledger", "Ledger")` and opt in to testing routines via `Stdlib.registerTesting(registry, System.out)`.
 6. **Register callbacks with idiomatic lambdas:** Bind functions and methods with `registry.function(...)` and `registry.method(...)`. Escape the Kotlin keyword when constructing object values: `Value.`object`(type, instance)`.
 7. **Handle parameter overloads explicitly:** Distinguish functions by parameter signatures (e.g. `money(int)` accepts integer cents, while `money(float)` accepts units and rounds half away from zero to cents).
 8. **Preserve raw byte strings:** Treat `VmString` as immutable byte sequences. In [Main.kt](src/main/kotlin/io/lmctl/lmcode/sample/Main.kt) and [Protocol.kt](src/main/kotlin/io/lmctl/lmcode/sample/Protocol.kt), stream raw byte values directly via `Reports.escapeBytes` to avoid corrupting arbitrary byte payloads or invalid UTF-8.
-9. **Load and execute bytecode:** Read the exact embedded schema bytes, call `Program.load(...)`, bind context variables with `context.setObject(...)`, run the program, and map errors to standard JSON.
-10. **Verify against the canonical corpus:** Run [test.sh](test.sh) to validate sync locks, compiler reproducibility, protocol conformity, and all 91 corpus cases.
+9. **Load and execute bytecode:** Read the exact embedded schema bytes, call `Program.load(...)`, bind context variables with `context.setObject(...)`, run the program, and map errors to standard JSON. After the body runs, call the program's rule entries (`Program.entries()` / `Program.call(...)`): each `@item` entry once per shop item in order, each `@total` entry once with the shop total, others never; non-void results print `entry NAME = VALUE` lines and the result object reports the call count as `"entries_called"`.
+10. **Verify against the canonical corpus:** Run [test.sh](test.sh) to validate sync locks, compiler reproducibility, protocol conformity, and all 94 corpus cases.
 
 ## Feature coverage
 
@@ -45,12 +45,13 @@ any compiler version, since annotations and interface bindings are compile-time 
 | Raw/dedented inner heredocs and all four outer splice types | 046–047 |
 | Native boundary conversions, 1 MiB strings, handles, 255 args, deep inline | 049–066 |
 | `@NAME` rule method annotation and `implements` SAM interface | 067 |
-| Bad magic/schema/import binding rejection | 090–092 |
+| Rule entries called by the host after the body (`@item`/`@total`, `entries_called`) | 068–069 |
+| Bad magic/schema/import binding rejection, v5 bytecode refused | 090–093 |
 | JSON navigation/types and typed map/stack/queue/priority queues | 101–108 |
 | Compiler list/map/JSON literals (`%w`, `%i`, `%f`, `%{...}`, `%json{...}`) | 201–205 |
 | Strict Base64/hex byte codecs and independent map `keys()`/`values()` snapshots | 301–305, 311–313 |
 
-The [canonical matrix](sample-suite/README.md) details all 91 programs. Every one of the 181 standard library and 45 host domain signatures is fully verified. Raw note bytes and LF line endings are preserved across all platforms.
+The [canonical matrix](sample-suite/README.md) details all 94 programs. Every one of the 181 standard library and 45 host domain signatures is fully verified. Raw note bytes and LF line endings are preserved across all platforms.
 
 ## Conversions
 
