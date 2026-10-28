@@ -204,6 +204,16 @@ class Host {
         }
     }
 
+    /** Rule-entry dispatch handles (CONTRACT.md): the shop's items in order. */
+    fun itemHandles(): List<Money> = shop.items.values
+
+    /** The same total the Shop.total() callback computes, as a fresh Money handle. */
+    fun totalHandle(): Value {
+        var total = 0L
+        for (item in shop.items.values) total += item.cents
+        return money(total)
+    }
+
     fun context(): Context {
         val ctx = Context()
         ctx.instructionLimit = Long.MAX_VALUE

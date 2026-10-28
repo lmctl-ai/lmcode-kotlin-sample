@@ -1,7 +1,11 @@
 package io.lmctl.lmcode.sample
 
+import io.lmctl.lmcode.Context
+import io.lmctl.lmcode.Formatting
 import io.lmctl.lmcode.Program
+import io.lmctl.lmcode.Registry
 import io.lmctl.lmcode.Reports
+import io.lmctl.lmcode.Value
 import io.lmctl.lmcode.VmException
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -79,6 +83,27 @@ object Main {
                 return Reports.error("run", e)
             }
 
+            // Rule entries (DSLB v6): after the body, @item entries run once per shop
+            // item in order, @total once with the shop total, other annotations never.
+            var entriesCalled = 0
+            val programEntries = program.entries()
+            try {
+                for (i in programEntries.indices) {
+                    when (programEntries[i].annotation()) {
+                        "item" -> for (item in host.itemHandles()) {
+                            callEntry(program, i, context, host.registry, Value.`object`("Money", item))
+                            entriesCalled++
+                        }
+                        "total" -> {
+                            callEntry(program, i, context, host.registry, host.totalHandle())
+                            entriesCalled++
+                        }
+                    }
+                }
+            } catch (e: VmException) {
+                return Reports.error("run", e)
+            }
+
             if (host.ledger.balance < 0L) {
                 return Reports.appFailure("ledger: negative balance")
             }
@@ -89,10 +114,36 @@ object Main {
                     .toByteArray(StandardCharsets.US_ASCII)
             )
             result.writeBytes(Reports.escapeBytes(host.ledger.note))
-            result.write('}'.code)
+            result.writeBytes(", \"entries_called\": $entriesCalled}".toByteArray(StandardCharsets.US_ASCII))
             Reports.ok(result.toByteArray())
         } catch (e: Exception) {
             Reports.appFailure("cannot read sample input")
         }
+    }
+
+    /** Calls rule entry index with one argument; a non-void result prints `entry NAME = VALUE`. */
+    private fun callEntry(program: Program, index: Int, context: Context, registry: Registry, argument: Value) {
+        val entry = program.entries()[index]
+        val result = program.call(index, context, registry, listOf(argument))
+        if (result.kind() != Value.Kind.NONE) {
+            val line = ByteArrayOutputStream(64)
+            line.writeBytes("entry ".toByteArray(StandardCharsets.US_ASCII))
+            line.writeBytes(entry.name().toByteArray(StandardCharsets.UTF_8))
+            line.writeBytes(" = ".toByteArray(StandardCharsets.US_ASCII))
+            line.writeBytes(valueText(result))
+            line.write('\n'.code)
+            val bytes = line.toByteArray()
+            System.out.write(bytes, 0, bytes.size)
+            System.out.flush()
+        }
+    }
+
+    /** Same text as the language's str(): int decimal, float %.15g semantics, bool true/false. */
+    private fun valueText(value: Value): ByteArray = when (value.kind()) {
+        Value.Kind.INT -> value.asInt().toString().toByteArray(StandardCharsets.US_ASCII)
+        Value.Kind.FLOAT -> Formatting.formatG15(value.asFloat()).toByteArray(StandardCharsets.US_ASCII)
+        Value.Kind.BOOL -> (if (value.asBool()) "true" else "false").toByteArray(StandardCharsets.US_ASCII)
+        Value.Kind.STR -> value.asString().bytes()
+        else -> ByteArray(0)
     }
 }
