@@ -15,7 +15,7 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 object Main {
-    const val VERSION = "0.2.0"
+    val VERSION = Main::class.java.getResourceAsStream("/sample-version.txt")!!.bufferedReader().use { it.readText().trim() }
 
     private fun schemaBytes(): ByteArray {
         val input: InputStream = Main::class.java.getResourceAsStream("/sample.dsl.json")

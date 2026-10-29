@@ -84,3 +84,34 @@ mvn package -DskipTests
 ./bin/lmcode-kotlin-sample --dsl sample-suite/bytecode/001-literals.dslb
 java -jar target/lmcode-kotlin-sample.jar --dsl sample-suite/bytecode/014-ledger-methods.dslb
 ```
+
+## lmscript tests and automatic native releases
+
+```sh
+npm install -g @lmctl-ai/lmctl
+lmctl test.lms
+# Equivalent: lmscript test.lms
+# With GraalVM 21 and native compiler tools on PATH:
+RUN_NATIVE=1 lmscript --no-preflight test.lms
+```
+
+Both executables run `.lms` files; `lmctl` also accepts URLs ending in `.lms`.
+These tests require the checkout and run from its root. Python is used only
+for lock validation/synchronization; test orchestration uses the canonical
+lmscript drivers. Node supplies the byte-preserving process adapter.
+
+[examples/rule-entries.lms](examples/rule-entries.lms) demonstrates `@item`
+and `@total` functions implementing `Adjuster(Money) -> void`, plus an
+undispatched `@never` entry. Tests compile it and compare the exact trace.
+The canonical program 069 demonstrates an interface returning a value.
+
+Every push to `main` builds with GraalVM Community 21 on Linux x64/arm64,
+macOS x64/arm64 and Windows x64. Each job tests the JVM host and all 94
+cases against the native executable. All five must pass before an automatic
+`v0.4.<workflow run number>` release is published with checksums and notices.
+Pull requests run the same checks without publishing. Native executables
+require no JVM; Linux targets glibc and Windows requires the MSVC runtime.
+
+```sh
+lmscript install github:lmctl-ai/lmcode-kotlin-sample@latest
+```
