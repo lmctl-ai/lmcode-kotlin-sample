@@ -27,7 +27,7 @@ and refuses v5 files at load (093).
 7. **Handle parameter overloads explicitly:** Distinguish functions by parameter signatures (e.g. `money(int)` accepts integer cents, while `money(float)` accepts units and rounds half away from zero to cents).
 8. **Preserve raw byte strings:** Treat `VmString` as immutable byte sequences. In [Main.kt](src/main/kotlin/io/lmctl/lmcode/sample/Main.kt) and [Protocol.kt](src/main/kotlin/io/lmctl/lmcode/sample/Protocol.kt), stream raw byte values directly via `Reports.escapeBytes` to avoid corrupting arbitrary byte payloads or invalid UTF-8.
 9. **Load and execute bytecode:** Read the exact embedded schema bytes, call `Program.load(...)`, bind context variables with `context.setObject(...)`, run the program, and map errors to standard JSON. After the body runs, call the program's rule entries (`Program.entries()` / `Program.call(...)`): each `@item` entry once per shop item in order, each `@total` entry once with the shop total, others never; non-void results print `entry NAME = VALUE` lines and the result object reports the call count as `"entries_called"`.
-10. **Verify against the canonical corpus:** Run [test.sh](test.sh) to validate sync locks, compiler reproducibility, protocol conformity, and all 94 corpus cases.
+10. **Verify against the canonical corpus:** Run [test.sh](test.sh) to validate sync locks, compiler reproducibility, protocol conformity, and all 108 corpus cases.
 
 ## Feature coverage
 
@@ -51,7 +51,7 @@ and refuses v5 files at load (093).
 | Compiler list/map/JSON literals (`%w`, `%i`, `%f`, `%{...}`, `%json{...}`) | 201–205 |
 | Strict Base64/hex byte codecs and independent map `keys()`/`values()` snapshots | 301–305, 311–313 |
 
-The [canonical matrix](sample-suite/README.md) details all 94 programs. Every one of the 181 standard library and 45 host domain signatures is fully verified. Raw note bytes and LF line endings are preserved across all platforms.
+The [canonical matrix](sample-suite/README.md) details all 108 cases. Every one of the 182 standard library and 45 host domain signatures is fully verified. Raw note bytes and LF line endings are preserved across all platforms.
 
 ## Conversions
 
@@ -106,7 +106,7 @@ undispatched `@never` entry. Tests compile it and compare the exact trace.
 The canonical program 069 demonstrates an interface returning a value.
 
 Every push to `main` builds with GraalVM Community 21 on Linux x64/arm64,
-macOS x64/arm64 and Windows x64. Each job tests the JVM host and all 94
+macOS x64/arm64 and Windows x64. Each job tests the JVM host and all 108
 cases against the native executable. All five must pass before an automatic
 `v0.4.<workflow run number>` release is published with checksums and notices.
 Pull requests run the same checks without publishing. Native executables
@@ -115,3 +115,9 @@ require no JVM; Linux targets glibc and Windows requires the MSVC runtime.
 ```sh
 lmscript install github:lmctl-ai/lmcode-kotlin-sample@latest
 ```
+
+## Text templates
+
+[examples/text-template.lms](examples/text-template.lms) renders ordinary text from a nested context with indexed lists, loops and boolean conditions. The standard `template_render(string, Json) -> string` function performs one pass; inserted values stay literal. Compile it with `lmscript --no-preflight examples/text-template.lms build/text-template.dslb`, then run the sample host with `--dsl build/text-template.dslb`.
+
+The lmscript-driven suite runs 108 cases, including template success/error cases. See the [portable template contract](https://github.com/lmctl-ai/lmcode-cpp/blob/main/std/template.md).
