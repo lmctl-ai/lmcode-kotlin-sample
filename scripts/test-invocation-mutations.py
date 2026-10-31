@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """Build real JVM adapter faults in private copies; compile failures never count as catches."""
 from pathlib import Path
-import shutil, subprocess, sys, tempfile
+import os, shutil, subprocess, sys, tempfile
 repo=Path(__file__).resolve().parent.parent
 source_rel=Path('src/main/kotlin/io/lmctl/lmcode/sample/Main.kt')
 with tempfile.TemporaryDirectory(prefix='lmcode-jvm-mutants-') as tmp:
  work=Path(tmp)/'sample'; shutil.copytree(repo,work,ignore=shutil.ignore_patterns('.git','target','build','__pycache__'))
  source=work/source_rel; original=source.read_text(); host=work/'bin/lmcode-kotlin-sample'
+ bash='bash'
+ if os.name=='nt':
+  bash=str(Path(os.environ.get('ProgramFiles',r'C:\Program Files'))/'Git'/'bin'/'bash.exe')
+  host=work/'build/lmcode-kotlin-sample.exe'
  def build():
-  p=subprocess.run(['bash','scripts/build-jvm.sh'],cwd=work,capture_output=True)
+  p=subprocess.run([bash,'scripts/build-jvm.sh'],cwd=work,capture_output=True)
   if p.returncode: raise AssertionError(('mutant compile failed',p.stdout,p.stderr))
+  if os.name=='nt':
+   p=subprocess.run([bash,'scripts/build-native.sh'],cwd=work,capture_output=True)
+   if p.returncode: raise AssertionError(('mutant native compile failed',p.stdout,p.stderr))
  def run(): return subprocess.run([sys.executable,str(work/'scripts/check-invocations.py'),str(host)],cwd=work,capture_output=True)
  build(); p=run(); assert p.returncode==0,(p.stdout,p.stderr)
  mutants=[('stale bare frame','results.writeFrame(System.out)','Protocol.printLf("{\\"ok\\":true,\\"result\\":null}"); results.writeFrame(System.out)'),('missing part','files.add(args[i + 1]); priorities.add','/* dropped argv part */ priorities.add'),('duplicate part','files.add(args[i + 1]); priorities.add','files.add(args[i + 1]); files.add(args[i + 1]); priorities.add'),('argv role loss','priorities.add(if (args[i] == "--first") 0 else if (args[i] == "--last") 2 else 1)','priorities.add(1)'),('reset shared host counter','val part = results.registrations()[position]','val part = results.registrations()[position]; host.ledger.balance = 0; host.ledger.entries = 0')]
