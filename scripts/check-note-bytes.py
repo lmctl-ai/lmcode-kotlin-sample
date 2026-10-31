@@ -20,13 +20,14 @@ with tempfile.TemporaryDirectory(prefix='sample bytes ') as scratch:
     (folder / 'note.bin').write_bytes(note)
     source = folder / 'note.lms'
     bytecode = folder / 'note.dslb'
-    source.write_text('program = _lmcode_ schema=' + json.dumps((root / 'sample-suite/sample.dsl.json').as_posix()) + ';\n'
+    source.write_text('program = _lmcode_ schema=' + json.dumps((root / 'sample-suite/sample.dsl.json').as_posix()) + ' out=ARGV[0];\n'
                       'ledger.note(file_read(sample_tmp() + "/note.bin"));\n'
-                      'end _lmcode_\nsavedsl(program, ARGV[0]);\n', encoding='utf-8')
+                      'end _lmcode_\n', encoding='utf-8')
     subprocess.run([compiler, '--no-preflight', str(source), str(bytecode)], check=True)
-    result = subprocess.run([*sys.argv[1:], '--dsl', str(bytecode)],
+    result = subprocess.run([*sys.argv[1:], '--lmcode', str(bytecode)],
                             env=dict(os.environ, SAMPLE_TMP=scratch), capture_output=True, timeout=30)
     expected = b'{"ok": true, "result": {"balance": 0, "entries": 0, "note": "\\u0000\\u0008\\u000c\\t\\r\\n\\"\\\\\xff\xc3\xa9", "entries_called": 0}}\n'
+    expected += b'LMCODE_RETURN_BEGIN\nnull\nLMCODE_RETURN_END\n'
     if result.returncode or result.stderr or result.stdout != expected:
         sys.exit(f'note-byte mismatch: exit={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}')
 print('PASS note bytes: NUL, JSON escapes, invalid UTF-8 and multibyte UTF-8')
