@@ -81,8 +81,8 @@ mvn package -DskipTests
 
 # Run directly via launcher or JAR
 ./bin/lmcode-kotlin-sample --version
-./bin/lmcode-kotlin-sample --dsl sample-suite/bytecode/001-literals.dslb
-java -jar target/lmcode-kotlin-sample.jar --dsl sample-suite/bytecode/014-ledger-methods.dslb
+./bin/lmcode-kotlin-sample --lmcode sample-suite/bytecode/001-literals.dslb
+java -jar target/lmcode-kotlin-sample.jar --lmcode sample-suite/bytecode/014-ledger-methods.dslb
 ```
 
 ## lmscript tests and automatic native releases
@@ -118,10 +118,14 @@ lmscript install github:lmctl-ai/lmcode-kotlin-sample@latest
 
 ## Text templates
 
-[examples/text-template.lms](examples/text-template.lms) renders ordinary text from a nested context with indexed lists, loops and boolean conditions. The standard `template_render(string, Json) -> string` function performs one pass; inserted values stay literal. Compile it with `lmscript --no-preflight examples/text-template.lms build/text-template.dslb`, then run the sample host with `--dsl build/text-template.dslb`.
+[examples/text-template.lms](examples/text-template.lms) renders ordinary text from a nested context with indexed lists, loops and boolean conditions. The standard `template_render(string, Json) -> string` function performs one pass; inserted values stay literal. Compile it with `lmscript --no-preflight examples/text-template.lms build/text-template.dslb`, then run the sample host with `--lmcode build/text-template.dslb`.
 
 The lmscript-driven suite runs 108 cases, including template success/error cases. See the [portable template contract](https://github.com/lmctl-ai/lmcode-cpp/blob/main/std/template.md).
 
 ## Historical literal names
 
-The documentation calls the language lmcode. `--dsl`, `--dsl-schema` and `--dsl-signatures` are current host flag literals; `DSLB` is the bytecode magic and `DSLB v6` is the current format name; `.dslb` is the current bytecode filename extension. Other code-formatted API names, paths, manifest names and diagnostic text retain their current literal spellings.
+The documentation calls the language lmcode. `--lmcode`, `--lmcode-schema` and `--lmcode-signatures` are current host flag literals; `DSLB` is the bytecode magic and `DSLB v6` is the current format name; `.dslb` is the current bytecode filename extension. Other code-formatted API names, paths, manifest names and diagnostic text retain their current literal spellings.
+
+## Invocation result
+
+One SDK `ResultSink` spans the body and selected rule entries. After successful application validation the host emits its terminal frame; unset results produce `null`, and failures emit no frame. The canonical suite has 123 cases. Set `LMSCRIPT_BIN` to a mono-main compiler with the renamed host flags and `out=` support; older published compilers lack this contract.

@@ -5,6 +5,7 @@ import io.lmctl.lmcode.Formatting
 import io.lmctl.lmcode.Program
 import io.lmctl.lmcode.Registry
 import io.lmctl.lmcode.Reports
+import io.lmctl.lmcode.ResultSink
 import io.lmctl.lmcode.Value
 import io.lmctl.lmcode.VmException
 import java.io.ByteArrayOutputStream
@@ -24,7 +25,7 @@ object Main {
     }
 
     private fun usage(): Int {
-        val json = """{"ok": false, "phase": "cli", "code": "CLI_USAGE", "message": "usage: --version | --dsl-schema [--json] | --dsl-signatures | --dsl FILE"}"""
+        val json = """{"ok": false, "phase": "cli", "code": "CLI_USAGE", "message": "usage: --version | --lmcode-schema [--json] | --lmcode-signatures | --lmcode FILE"}"""
         Protocol.printLf(json)
         return 2
     }
@@ -44,18 +45,18 @@ object Main {
                 Protocol.printLf("lmcode-kotlin-sample $VERSION")
                 return 0
             }
-            if ((args.size == 1 || (args.size == 2 && args[1] == "--json")) && args[0] == "--dsl-schema") {
+            if ((args.size == 1 || (args.size == 2 && args[1] == "--json")) && args[0] == "--lmcode-schema") {
                 System.out.write(schema)
                 System.out.flush()
                 return 0
             }
-            if (args.size == 1 && args[0] == "--dsl-signatures") {
+            if (args.size == 1 && args[0] == "--lmcode-signatures") {
                 for (sig in host.registry.signatures()) {
                     Protocol.printLf(sig)
                 }
                 return 0
             }
-            if (args.size != 2 || args[0] != "--dsl") {
+            if (args.size != 2 || args[0] != "--lmcode") {
                 return usage()
             }
 
@@ -76,6 +77,9 @@ object Main {
                 return Reports.error("load", VmException(e.code, message))
             }
 
+            // Retain the invocation result across body and rule-entry arena resets.
+            val sink = ResultSink()
+            host.registry.setResultSink(sink)
             val context = host.context()
             try {
                 program.run(context, host.registry)
@@ -115,7 +119,10 @@ object Main {
             )
             result.writeBytes(Reports.escapeBytes(host.ledger.note))
             result.writeBytes(", \"entries_called\": $entriesCalled}".toByteArray(StandardCharsets.US_ASCII))
-            Reports.ok(result.toByteArray())
+            val code = Reports.ok(result.toByteArray())
+            if (code != 0) return code
+            Reports.writeResultFrame(System.out, sink)
+            0
         } catch (e: Exception) {
             Reports.appFailure("cannot read sample input")
         }
