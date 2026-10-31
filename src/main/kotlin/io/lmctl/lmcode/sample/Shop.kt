@@ -6,6 +6,11 @@ import io.lmctl.lmcode.Stdlib
 import io.lmctl.lmcode.Value
 import io.lmctl.lmcode.VmException
 import io.lmctl.lmcode.VmString
+import java.io.IOException
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import java.util.ArrayList
 import java.util.Collections
 import java.util.HexFormat
@@ -18,11 +23,27 @@ class Items(val values: MutableList<Money> = mutableListOf())
 class Shop(val items: Items = Items())
 class Ledger(var balance: Long = 0L, var entries: Long = 0L, var note: VmString = VmString.fromString(""))
 
-class Host {
+class Host(val dryMode: Boolean = false) {
     // Registry installs string/math/collection/file standard catalog by default.
-    val registry = Registry()
+    private fun writeSentinel(event: String) {
+        val path = System.getenv("LMCODE_H6_SENTINEL") ?: return
+        try {
+            Files.writeString(Path.of(path), "$event\n", StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE, StandardOpenOption.APPEND)
+        } catch (error: IOException) {
+            throw VmException.host("host setup/ledger sentinel: ${error.message}")
+        }
+    }
+
+    private fun createRegistry(): Registry {
+        if (!dryMode) writeSentinel("setup")
+        return Registry()
+    }
+
+    val registry = createRegistry()
     val shop = Shop()
     val ledger = Ledger()
+    var dryPreviewCalls = 0
 
     private fun valueObject(type: String, obj: Any?): Value = Value.`object`(type, obj)
     private fun money(cents: Long): Value = valueObject("Money", Money(cents))
@@ -56,8 +77,10 @@ class Host {
         }
 
         // Functions: overloads are distinguished by parameter types (int = cents, float = units)
-        registry.function("money", listOf("int"), "Money") { _, _, a -> money(a[0].asInt()) }
-        registry.function("money", listOf("float"), "Money") { _, _, a -> units(a[0].asFloat()) }
+        val moneyInt = Registry.Callback { _, _, a -> money(a[0].asInt()) }
+        val moneyFloat = Registry.Callback { _, _, a -> units(a[0].asFloat()) }
+        registry.function("money", listOf("int"), "Money", moneyInt, Registry.dry(moneyInt))
+        registry.function("money", listOf("float"), "Money", moneyFloat, Registry.dry(moneyFloat))
         registry.function("fee", listOf("int"), "int") { _, _, a -> Value.ofInt(a[0].asInt() + 5L) }
         registry.function("sample_tmp", emptyList(), "string") { _, _, _ ->
             val path = System.getenv("SAMPLE_TMP")
@@ -119,14 +142,18 @@ class Host {
 
         // Ledger methods: fluent mutation, state inspection, and located errors
         registry.method("Ledger", "record", listOf("Money"), "Ledger") { _, self, a ->
+            writeSentinel("record")
             val l = self.asObject() as Ledger
             l.balance += asMoney(a[0]).cents
             l.entries += 1L
             self
         }
-        registry.method("Ledger", "balance", emptyList(), "Money") { _, self, _ ->
+        val realBalance = Registry.Callback { _, self, _ -> money((self.asObject() as Ledger).balance) }
+        val dryBalance = Registry.Callback { _, self, _ ->
+            dryPreviewCalls++
             money((self.asObject() as Ledger).balance)
         }
+        registry.method("Ledger", "balance", emptyList(), "Money", realBalance, Registry.dry(dryBalance))
         registry.method("Ledger", "count", emptyList(), "int") { _, self, _ ->
             Value.ofInt((self.asObject() as Ledger).entries)
         }

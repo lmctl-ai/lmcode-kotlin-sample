@@ -40,11 +40,10 @@ object Main {
 
     fun run(args: Array<String>): Int {
         return try {
-            val host = Host()
             val schema = schemaBytes()
             if (args.size == 1 && args[0] == "--version") { Protocol.printLf("lmcode-kotlin-sample $VERSION"); return 0 }
             if ((args.size == 1 || (args.size == 2 && args[1] == "--json")) && args[0] == "--lmcode-schema") { System.out.write(schema); System.out.flush(); return 0 }
-            if (args.size == 1 && args[0] == "--lmcode-signatures") { host.registry.signatures().forEach(Protocol::printLf); return 0 }
+            if (args.size == 1 && args[0] == "--lmcode-signatures") { Host(false).registry.signatures().forEach(Protocol::printLf); return 0 }
             if (args.isEmpty() || args.size % 2 != 0) return usage()
             val files = mutableListOf<String>(); val priorities = mutableListOf<Int>()
             for (i in args.indices step 2) {
@@ -52,9 +51,11 @@ object Main {
                 files.add(args[i + 1]); priorities.add(if (args[i] == "--first") 0 else if (args[i] == "--last") 2 else 1)
             }
             val results = InvocationResults.fromCommand(files)
+            // Read the invocation mode before constructing host state or acquiring resources.
+            val host = Host(results.dry())
             val order = files.indices.sortedBy { priorities[it] }
             val contract = ResultContract.fromSchema(schema)
-            val context = host.context(); var entriesCalled = 0; var failed = false
+            val context = host.context(); context.setDry(results.dry()); var entriesCalled = 0; var failed = false
             for (position in order) {
                 val part = results.registrations()[position]; var phase = "load"
                 try {
@@ -74,7 +75,8 @@ object Main {
                 val summary = ByteArrayOutputStream(64)
                 summary.writeBytes("{\"host_summary\":{\"balance\": ${host.ledger.balance}, \"entries\": ${host.ledger.entries}, \"note\": ".toByteArray(StandardCharsets.US_ASCII))
                 summary.writeBytes(Reports.escapeBytes(host.ledger.note))
-                summary.writeBytes(", \"entries_called\": $entriesCalled}}\n".toByteArray(StandardCharsets.US_ASCII))
+                val preview = if (results.dry()) ", \"dry_preview_calls\": ${host.dryPreviewCalls}" else ""
+                summary.writeBytes(", \"entries_called\": $entriesCalled$preview}}\n".toByteArray(StandardCharsets.US_ASCII))
                 System.out.write(summary.toByteArray())
             }
             results.writeFrame(System.out)
