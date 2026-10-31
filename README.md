@@ -26,8 +26,26 @@ and refuses v5 files at load (093).
 6. **Register callbacks with idiomatic lambdas:** Bind functions and methods with `registry.function(...)` and `registry.method(...)`. Escape the Kotlin keyword when constructing object values: `Value.`object`(type, instance)`.
 7. **Handle parameter overloads explicitly:** Distinguish functions by parameter signatures (e.g. `money(int)` accepts integer cents, while `money(float)` accepts units and rounds half away from zero to cents).
 8. **Preserve raw byte strings:** Treat `VmString` as immutable byte sequences. In [Main.kt](src/main/kotlin/io/lmctl/lmcode/sample/Main.kt) and [Protocol.kt](src/main/kotlin/io/lmctl/lmcode/sample/Protocol.kt), stream raw byte values directly via `Reports.escapeBytes` to avoid corrupting arbitrary byte payloads or invalid UTF-8.
-9. **Load and execute bytecode:** Read the exact embedded schema bytes, call `Program.load(...)`, bind context variables with `context.setObject(...)`, run the program, and map errors to standard JSON. After the body runs, call the program's rule entries (`Program.entries()` / `Program.call(...)`): each `@item` entry once per shop item in order, each `@total` entry once with the shop total, others never; non-void results print `entry NAME = VALUE` lines and the result object reports the call count as `"entries_called"`.
-10. **Verify against the canonical corpus:** Run [test.sh](test.sh) to validate sync locks, compiler reproducibility, protocol conformity, and all 108 corpus cases.
+9. **Load and execute bytecode:** Read the exact embedded schema bytes, call `Program.load(...)`, bind context variables with `context.setObject(...)`, bind one invocation `ResultSink`, run the program, and map errors to standard JSON. After the body runs, call the program's rule entries (`Program.entries()` / `Program.call(...)`): each `@item` entry once per shop item in order, each `@total` entry once with the shop total, others never; non-void results print `entry NAME = VALUE` lines and the result object reports the call count as `"entries_called"`.
+10. **Verify against the canonical corpus:** Run [test.sh](test.sh) to validate sync locks, compiler reproducibility, protocol conformity, and all 123 corpus cases.
+
+## Invocation return frames
+
+The invocation sink is bound before the body and retained through selected rule
+entries. After successful dispatch and ledger validation, the host writes the
+existing JSON diagnostic, then the terminal result frame. Load, run, entry, and
+application failures emit no frame; no `$return` assignment produces a `null`
+payload. The canonical cases 360–368 and
+[`durable-memory/return-frames.md`](durable-memory/return-frames.md) define the
+contract.
+
+Successful stdout ends with:
+
+```text
+LMCODE_RETURN_BEGIN
+null
+LMCODE_RETURN_END
+```
 
 ## Feature coverage
 
@@ -46,12 +64,13 @@ and refuses v5 files at load (093).
 | Native boundary conversions, 1 MiB strings, handles, 255 args, deep inline | 049–066 |
 | `@NAME` rule method annotation and `implements` SAM interface | 067 |
 | Rule entries called by the host after the body (`@item`/`@total`, `entries_called`) | 068–069 |
+| Invocation return sink, retained entry writes, JSON frame and no-frame failures | 360–368 |
 | Bad magic/schema/import binding rejection, v5 bytecode refused | 090–093 |
 | JSON navigation/types and typed map/stack/queue/priority queues | 101–108 |
 | Compiler list/map/JSON literals (`%w`, `%i`, `%f`, `%{...}`, `%json{...}`) | 201–205 |
 | Strict Base64/hex byte codecs and independent map `keys()`/`values()` snapshots | 301–305, 311–313 |
 
-The [canonical matrix](sample-suite/README.md) details all 108 cases. Every one of the 182 standard library and 45 host domain signatures is fully verified. Raw note bytes and LF line endings are preserved across all platforms.
+The [canonical matrix](sample-suite/README.md) details all 123 cases. Every one of the 206 standard library and 45 host domain signatures is fully verified. Raw note bytes and LF line endings are preserved across all platforms.
 
 ## Conversions
 
@@ -106,7 +125,7 @@ undispatched `@never` entry. Tests compile it and compare the exact trace.
 The canonical program 069 demonstrates an interface returning a value.
 
 Every push to `main` builds with GraalVM Community 21 on Linux x64/arm64,
-macOS x64/arm64 and Windows x64. Each job tests the JVM host and all 108
+macOS x64/arm64 and Windows x64. Each job tests the JVM host and all 123
 cases against the native executable. All five must pass before an automatic
 `v0.4.<workflow run number>` release is published with checksums and notices.
 Pull requests run the same checks without publishing. Native executables
@@ -120,4 +139,4 @@ lmscript install github:lmctl-ai/lmcode-kotlin-sample@latest
 
 [examples/text-template.lms](examples/text-template.lms) renders ordinary text from a nested context with indexed lists, loops and boolean conditions. The standard `template_render(string, Json) -> string` function performs one pass; inserted values stay literal. Compile it with `lmscript --no-preflight examples/text-template.lms build/text-template.dslb`, then run the sample host with `--dsl build/text-template.dslb`.
 
-The lmscript-driven suite runs 108 cases, including template success/error cases. See the [portable template contract](https://github.com/lmctl-ai/lmcode-cpp/blob/main/std/template.md).
+The lmscript-driven suite runs 123 cases, including return-frame success/failure and template cases. See the [portable template contract](https://github.com/lmctl-ai/lmcode-cpp/blob/main/std/template.md).

@@ -5,6 +5,7 @@ import io.lmctl.lmcode.Formatting
 import io.lmctl.lmcode.Program
 import io.lmctl.lmcode.Registry
 import io.lmctl.lmcode.Reports
+import io.lmctl.lmcode.ResultSink
 import io.lmctl.lmcode.Value
 import io.lmctl.lmcode.VmException
 import java.io.ByteArrayOutputStream
@@ -77,6 +78,9 @@ object Main {
             }
 
             val context = host.context()
+            // One sink belongs to this logical invocation; keep it through every entry call.
+            val sink = ResultSink()
+            host.registry.setResultSink(sink)
             try {
                 program.run(context, host.registry)
             } catch (e: VmException) {
@@ -115,7 +119,9 @@ object Main {
             )
             result.writeBytes(Reports.escapeBytes(host.ledger.note))
             result.writeBytes(", \"entries_called\": $entriesCalled}".toByteArray(StandardCharsets.US_ASCII))
-            Reports.ok(result.toByteArray())
+            val status = Reports.ok(result.toByteArray())
+            Reports.writeResultFrame(System.out, sink)
+            status
         } catch (e: Exception) {
             Reports.appFailure("cannot read sample input")
         }
