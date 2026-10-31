@@ -118,7 +118,7 @@ lmscript install github:lmctl-ai/lmcode-kotlin-sample@latest
 
 ## Text templates
 
-[examples/text-template.lms](examples/text-template.lms) renders ordinary text from a nested context with indexed lists, loops and boolean conditions. The standard `template_render(string, Json) -> string` function performs one pass; inserted values stay literal. Compile it with `lmscript --no-preflight examples/text-template.lms build/text-template.dslb`, then run the sample host with `--lmcode build/text-template.dslb`.
+[examples/text-template.lms](examples/text-template.lms) renders ordinary text from a nested context with indexed lists, loops and boolean conditions. It constructs an lmcode program, calls `run_lmcode`, and checks `result.ok`; no bytecode file is exposed to the script author.
 
 The lmscript-driven suite runs 108 cases, including template success/error cases. See the [portable template contract](https://github.com/lmctl-ai/lmcode-cpp/blob/main/std/template.md).
 
@@ -126,6 +126,8 @@ The lmscript-driven suite runs 108 cases, including template success/error cases
 
 The documentation calls the language lmcode. `--lmcode`, `--lmcode-schema` and `--lmcode-signatures` are current host flag literals; `DSLB` is the bytecode magic and `DSLB v6` is the current format name; `.dslb` is the current bytecode filename extension. Other code-formatted API names, paths, manifest names and diagnostic text retain their current literal spellings.
 
-## Invocation result
+## Multi-program invocations
 
-One SDK `ResultSink` spans the body and selected rule entries. After successful application validation the host emits its terminal frame; unset results produce `null`, and failures emit no frame. The canonical suite has 123 cases. Set `LMSCRIPT_BIN` to a mono-main compiler with the renamed host flags and `out=` support; older published compilers lack this contract.
+[sample-suite/invocations.lms](sample-suite/invocations.lms) constructs reusable programs, adds them with `lmcode_build`, and runs the builder once per host invocation. Repeated `--lmcode FILE` pairs and role fragments such as `--first FILE` and `--last FILE` select programs in one process. Programs share the host ledger and context; returned values stay in add order inside one aggregate result. The host prints a tagged `host_summary` diagnostic and exactly one terminal return frame per `run_lmcode` call. The sample gate runs the byte/exit corpus, reusable program flow, and failing adapter mutants.
+
+The canonical suite has 123 cases. Use an `LMSCRIPT_BIN` built from mono main for the builder API and renamed host flags; older published compilers do not support this contract.

@@ -6,6 +6,8 @@ import io.lmctl.lmcode.Program
 import io.lmctl.lmcode.Registry
 import io.lmctl.lmcode.Reports
 import io.lmctl.lmcode.ResultSink
+import io.lmctl.lmcode.InvocationResults
+import io.lmctl.lmcode.ResultContract
 import io.lmctl.lmcode.Value
 import io.lmctl.lmcode.VmException
 import java.io.ByteArrayOutputStream
@@ -38,94 +40,46 @@ object Main {
 
     fun run(args: Array<String>): Int {
         return try {
-            val schema = schemaBytes()
             val host = Host()
-
-            if (args.size == 1 && args[0] == "--version") {
-                Protocol.printLf("lmcode-kotlin-sample $VERSION")
-                return 0
+            val schema = schemaBytes()
+            if (args.size == 1 && args[0] == "--version") { Protocol.printLf("lmcode-kotlin-sample $VERSION"); return 0 }
+            if ((args.size == 1 || (args.size == 2 && args[1] == "--json")) && args[0] == "--lmcode-schema") { System.out.write(schema); System.out.flush(); return 0 }
+            if (args.size == 1 && args[0] == "--lmcode-signatures") { host.registry.signatures().forEach(Protocol::printLf); return 0 }
+            if (args.isEmpty() || args.size % 2 != 0) return usage()
+            val files = mutableListOf<String>(); val priorities = mutableListOf<Int>()
+            for (i in args.indices step 2) {
+                if (args[i] !in listOf("--lmcode", "--first", "--last")) return usage()
+                files.add(args[i + 1]); priorities.add(if (args[i] == "--first") 0 else if (args[i] == "--last") 2 else 1)
             }
-            if ((args.size == 1 || (args.size == 2 && args[1] == "--json")) && args[0] == "--lmcode-schema") {
-                System.out.write(schema)
-                System.out.flush()
-                return 0
-            }
-            if (args.size == 1 && args[0] == "--lmcode-signatures") {
-                for (sig in host.registry.signatures()) {
-                    Protocol.printLf(sig)
-                }
-                return 0
-            }
-            if (args.size != 2 || args[0] != "--lmcode") {
-                return usage()
-            }
-
-            val bytecode = try {
-                Files.readAllBytes(Path.of(args[1]))
-            } catch (e: Exception) {
-                return Reports.appFailure("cannot read sample input")
-            }
-
-            val program = try {
-                Program.load(bytecode, schema, host.registry)
-            } catch (e: VmException) {
-                val message = when (e.code) {
-                    "LOAD_SCHEMA_MISMATCH" -> "sample schema mismatch"
-                    "LOAD_UNBOUND" -> "sample import mismatch"
-                    else -> "invalid sample bytecode"
-                }
-                return Reports.error("load", VmException(e.code, message))
-            }
-
-            // Retain the invocation result across body and rule-entry arena resets.
-            val sink = ResultSink()
-            host.registry.setResultSink(sink)
-            val context = host.context()
-            try {
-                program.run(context, host.registry)
-            } catch (e: VmException) {
-                return Reports.error("run", e)
-            }
-
-            // Rule entries (DSLB v6): after the body, @item entries run once per shop
-            // item in order, @total once with the shop total, other annotations never.
-            var entriesCalled = 0
-            val programEntries = program.entries()
-            try {
-                for (i in programEntries.indices) {
-                    when (programEntries[i].annotation()) {
-                        "item" -> for (item in host.itemHandles()) {
-                            callEntry(program, i, context, host.registry, Value.`object`("Money", item))
-                            entriesCalled++
-                        }
-                        "total" -> {
-                            callEntry(program, i, context, host.registry, host.totalHandle())
-                            entriesCalled++
-                        }
+            val results = InvocationResults.fromCommand(files)
+            val order = files.indices.sortedBy { priorities[it] }
+            val contract = ResultContract.fromSchema(schema)
+            val context = host.context(); var entriesCalled = 0; var failed = false
+            for (position in order) {
+                val part = results.registrations()[position]; var phase = "load"
+                try {
+                    val program = try { Program.load(Files.readAllBytes(Path.of(part.file())), schema, host.registry) }
+                    catch (e: VmException) { throw VmException(e.code, when(e.code) { "LOAD_SCHEMA_MISMATCH" -> "sample schema mismatch"; "LOAD_UNBOUND" -> "sample import mismatch"; else -> "invalid sample bytecode" }) }
+                    results.select(part.index(), host.registry, contract); phase = "run"; program.run(context, host.registry)
+                    for (i in program.entries().indices) when (program.entries()[i].annotation()) {
+                        "item" -> host.shop.items.values.forEach { item -> callEntry(program, i, context, host.registry, Value.`object`("Money", item)); entriesCalled++ }
+                        "total" -> { callEntry(program, i, context, host.registry, host.totalHandle()); entriesCalled++ }
                     }
-                }
-            } catch (e: VmException) {
-                return Reports.error("run", e)
+                    results.complete(part.index())
+                } catch (e: VmException) { results.fail(part.index(), phase, e); failed = true; break }
+                catch (e: Exception) { results.fail(part.index(), "app", VmException("APP_FAIL", "cannot read sample input")); failed = true; break }
             }
-
-            if (host.ledger.balance < 0L) {
-                return Reports.appFailure("ledger: negative balance")
+            if (!failed && host.ledger.balance < 0L) { results.fail(null, "app", VmException("APP_FAIL", "ledger: negative balance")); failed = true }
+            if (!failed) {
+                val summary = ByteArrayOutputStream(64)
+                summary.writeBytes("{\"host_summary\":{\"balance\": ${host.ledger.balance}, \"entries\": ${host.ledger.entries}, \"note\": ".toByteArray(StandardCharsets.US_ASCII))
+                summary.writeBytes(Reports.escapeBytes(host.ledger.note))
+                summary.writeBytes(", \"entries_called\": $entriesCalled}}\n".toByteArray(StandardCharsets.US_ASCII))
+                System.out.write(summary.toByteArray())
             }
-
-            val result = ByteArrayOutputStream(64)
-            result.writeBytes(
-                ("{\"balance\": ${host.ledger.balance}, \"entries\": ${host.ledger.entries}, \"note\": ")
-                    .toByteArray(StandardCharsets.US_ASCII)
-            )
-            result.writeBytes(Reports.escapeBytes(host.ledger.note))
-            result.writeBytes(", \"entries_called\": $entriesCalled}".toByteArray(StandardCharsets.US_ASCII))
-            val code = Reports.ok(result.toByteArray())
-            if (code != 0) return code
-            Reports.writeResultFrame(System.out, sink)
-            0
-        } catch (e: Exception) {
-            Reports.appFailure("cannot read sample input")
-        }
+            results.writeFrame(System.out)
+        } catch (e: VmException) { Reports.failureFrame("cli", e) }
+        catch (e: Exception) { Reports.failureFrame("app", VmException("APP_FAIL", "cannot read sample input")) }
     }
 
     /** Calls rule entry index with one argument; a non-void result prints `entry NAME = VALUE`. */
